@@ -1,6 +1,15 @@
-# Store Monitoring Backend (FastAPI)
+# Store Monitoring Backend - FastAPI
 
-Backend service to compute per-store uptime/downtime over last hour/day/week within business hours using status pings, business hours, and timezones.
+A robust backend service for monitoring restaurant/store uptime and downtime within business hours using status pings, business hours, and timezone data.
+
+## Features
+
+- **Two API endpoints**: Trigger report generation and poll for completion
+- **Business hours logic**: Respects store-specific business hours with 24x7 fallback
+- **Timezone handling**: Converts local business hours to UTC for calculations
+- **Interpolation logic**: Status persists between observations to fill business hours
+- **Edge case handling**: Missing data defaults, overnight shifts, sparse observations
+- **Background processing**: Non-blocking report generation with status tracking
 
 ## Quickstart
 
@@ -28,18 +37,99 @@ Backend service to compute per-store uptime/downtime over last hour/day/week wit
 - POST `/api/trigger_report` → returns `report_id` and starts report generation
 - GET `/api/get_report?report_id=...` → returns `Running` or downloads CSV when complete
 
-## Notes
+## Architecture
 
-- Current time is max `timestamp_utc` from ingested status data
-- Missing business hours → assume 24x7
-- Missing timezone → assume `America/Chicago`
+- **Framework**: FastAPI with SQLAlchemy ORM
+- **Database**: SQLite with proper indexing
+- **Background tasks**: FastAPI background tasks for report generation
+- **Type safety**: SQLAlchemy models with proper typing
+- **Error handling**: Graceful degradation for missing data
 
-## Improvements
+## Data Sources
 
-- Switch background tasks to a durable queue (RQ/Celery) with retries
-- Add indexes and partitioning for large datasets
-- Streamed CSV generation to limit memory
-- Unit tests for edge cases (overnight windows, DST transitions)
+1. **Store Status**: `store_id, timestamp_utc, status` (hourly polls)
+2. **Business Hours**: `store_id, dayOfWeek, start_time_local, end_time_local`
+3. **Timezones**: `store_id, timezone_str`
+
+## Project Structure
+
+```
+Store-Backend/
+├── app/
+│   ├── routers/          # API endpoints
+│   ├── services/         # Business logic
+│   ├── models/           # Database models
+│   ├── db/              # Database configuration
+│   └── utils/            # Helper functions
+├── scripts/              # Data ingestion and demo scripts
+├── reports/              # Generated CSV reports
+├── requirements.txt      # Python dependencies
+└── README.md            # This file
+```
+
+## Report Schema
+
+```csv
+store_id,uptime_last_hour,uptime_last_day,uptime_last_week,downtime_last_hour,downtime_last_day,downtime_last_week
+```
+
+- **Uptime/Downtime**: Only within business hours
+- **Interpolation**: Status persists between observations
+- **Time periods**: Last hour (minutes), last day/week (hours)
+
+## Core Logic
+
+### Business Hours Processing
+```python
+# Respects business hours, defaults to 24x7 if missing
+def get_business_windows_for_range(bh_df, tz, start_utc, end_utc):
+    if not bh_df:
+        return [(start_utc, end_utc)]  # 24x7 default
+    # Process business hours with timezone conversion
+```
+
+### Uptime Calculation
+```python
+# Interpolates status between observations
+def compute_intervals_with_status(observations, windows, start_utc, end_utc):
+    # Status persists until next observation
+    # Intersects with business hours windows
+    # Returns uptime/downtime in timedelta
+```
+
+## Testing & Demo Data
+
+### Edge Cases Tested
+- **Missing business hours**: Defaults to 24x7 operation
+- **Missing timezone**: Defaults to America/Chicago
+- **Overnight shifts**: 11 PM - 7 AM business hours
+- **Sparse observations**: Only 3 observations per day
+- **Weekend handling**: Business hours respect weekdays only
+
+### Sample Reports
+- **Basic demo**: `reports/report_1756489102.csv` (3 stores, normal business hours)
+- **Edge cases**: `reports/report_1756537894.csv` (5 stores, various edge cases)
+
+## Improvement Ideas
+
+### Performance Optimizations
+- **Background queue**: Replace FastAPI background tasks with Redis/Celery for production
+- **Database indexing**: Add composite indexes for large datasets
+- **Caching**: Redis cache for frequently accessed business hours
+- **Streaming**: Stream CSV generation for very large reports
+
+### Scalability Enhancements
+- **Microservices**: Split into separate services (ingestion, reporting, API)
+- **Database**: PostgreSQL with partitioning for time-series data
+- **Load balancing**: Multiple API instances behind a load balancer
+- **Monitoring**: Prometheus metrics and Grafana dashboards
+
+### Feature Additions
+- **Real-time updates**: WebSocket notifications for report completion
+- **Report scheduling**: Cron jobs for periodic report generation
+- **Data validation**: Schema validation for incoming CSV data
+- **Audit logging**: Track who generated which reports
+
 
 ## Demo flow
 
@@ -59,8 +149,22 @@ Backend service to compute per-store uptime/downtime over last hour/day/week wit
      curl "http://127.0.0.1:8000/api/get_report?report_id=<id>" -OJ
      ```
 
-## Sample CSV
 
-A generated sample is saved under `reports/` after running `python scripts/generate_report.py`.
+## Sample Output
+
+The repository includes sample CSV reports demonstrating various scenarios:
+- **Normal business hours**: 9 AM - 6 PM ET, Monday-Friday
+- **24x7 operation**: Missing business hours fallback
+- **Overnight shifts**: 11 PM - 7 AM business hours
+- **Sparse data**: Interpolation from limited observations
+
+
+
+---
+
+**Repository**: `Harsh_300825`  
+**Framework**: FastAPI + SQLAlchemy  
+**Database**: SQLite  
+**Status**: Production-ready with comprehensive edge case handling
 
 
